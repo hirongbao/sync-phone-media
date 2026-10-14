@@ -274,7 +274,7 @@ if __name__ == '__main__':
         sys.exit(0)
         
     logger.info("==================================================")
-    logger.info("      相册双向管家 Daemon (开源适配版)")
+    logger.info("      媒体双向管家 Daemon (sync-phone-media)")
     logger.info("==================================================")
     logger.info(f"[*] 监控的电脑文件夹: {PC_SYNC_DIR}")
     logger.info(f"[*] 同步频率: 每 {SYNC_INTERVAL} 秒自动检查一次")

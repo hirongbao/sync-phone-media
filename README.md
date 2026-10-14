@@ -1,4 +1,4 @@
-# 📷 Android 相册极速双向同步管家 (Phone Photo Sync Daemon)
+# 📷🎬 Android 媒体极速双向同步管家 (sync-phone-media)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python 3.8+">
@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License MIT">
 </p>
 
-基于 **Android 11+ 无线调试 (Wireless Debugging) mDNS 协议** 开发的极速局域网相册双向同步守护程序。
+基于 **Android 11+ 无线调试 (Wireless Debugging) mDNS 协议** 开发的极速局域网相册与视频媒体双向同步守护程序。
 
 无需安装任何手机端 App，不经过任何第三方云盘服务器，全走家庭/办公室千兆局域网 Wi-Fi，兼具**极速传输、隐私安全、大文件保护与双向深度删除**。
 
@@ -42,7 +42,7 @@ Android 11+ 的无线调试每次重连或重启 Wi-Fi 都会随机更换端口�
 ## 📂 目录结构
 
 ```text
-sync-phone-image/
+sync-phone-media/
 ├── sync_daemon.py        # 核心后台守护程序 (同步/删除/断线重连/校验)
 ├── pair_helper.py        # 一键配对辅助引导脚本
 ├── auto_connect.py       # 局域网 mDNS 设备扫描调试工具
@@ -64,8 +64,8 @@ sync-phone-image/
 1. 电脑端需安装 **Python 3.8 或更高版本**（安装时记得勾选 `Add Python to PATH`）。
 2. 克隆本仓库或下载压缩包并解压：
    ```bash
-   git clone https://github.com/your-username/sync-phone-image.git
-   cd sync-phone-image
+   git clone https://github.com/your-username/sync-phone-media.git
+   cd sync-phone-media
    ```
 3. 安装依赖：
    ```bash
