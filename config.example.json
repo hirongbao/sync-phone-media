@@ -1,0 +1,6 @@
+{
+    "pc_sync_dir": "D:\\Photos\\PhoneSync",
+    "sync_interval_seconds": 10,
+    "log_max_size_mb": 10,
+    "log_backup_count": 3
+}

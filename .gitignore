@@ -1,0 +1,31 @@
+# 个人本地配置与私有数据 (务必不要提交个人相册目录与文件记录)
+config.json
+sync_state.json
+
+# 运行时日志与进程锁
+sync_daemon.log*
+sync_daemon.lock
+*.log
+
+# Python 字节码与缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# 编辑器与 IDE 配置
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# 操作系统临时文件
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.tmp
