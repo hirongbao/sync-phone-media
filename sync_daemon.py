@@ -262,15 +262,17 @@ def perform_sync():
         logger.info(f"[✅] 成功备份了 {new_files_downloaded} 张新照片/视频到电脑！")
 
 def acquire_single_instance_lock():
-    """使用文件排他锁，确保同一时间只有一个进程在运行"""
+    """使用文件排他锁，确保同一时间只有一个进程在运行。
+    锁文件存放在系统临时目录中，避免污染项目目录或被同步盘（坚果云/OneDrive）报文件占用错误。"""
     try:
         import msvcrt
+        import tempfile
         global _lock_file_pointer
-        lock_file = os.path.join(CURRENT_DIR, "sync_daemon.lock")
+        lock_file = os.path.join(tempfile.gettempdir(), "sync_phone_media_daemon.lock")
         _lock_file_pointer = open(lock_file, 'w')
         msvcrt.locking(_lock_file_pointer.fileno(), msvcrt.LK_NBLCK, 1)
         return True
-    except IOError:
+    except (IOError, OSError):
         return False
 
 if __name__ == '__main__':
