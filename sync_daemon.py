@@ -80,6 +80,7 @@ if not os.path.exists(ADB_PATH):
         ADB_PATH = sys_adb
 STATE_FILE = os.path.join(CURRENT_DIR, "sync_state.json")
 TYPE_CONNECT = "_adb-tls-connect._tcp.local."
+TYPE_ADB = "_adb._tcp.local."
 
 target_ip = None
 target_port = None
@@ -126,6 +127,10 @@ def on_service_state_change(zeroconf, service_type, name, state_change):
                 target_ip = addresses[0]
                 target_port = info.port
                 logger.info(f"\n[📡] 接收到手机广播！抓取到全新端口: {target_ip}:{target_port}")
+                state = load_state()
+                state["last_ip"] = target_ip
+                state["last_port"] = target_port
+                save_state(state)
 
 def perform_sync():
     """执行核心逻辑：检查删除 -> 同步新照片 (MediaStore 引擎)"""
@@ -282,9 +287,18 @@ if __name__ == '__main__':
     logger.info("\n[*] 正在等待手机接入局域网...")
     
     run_adb_command(["start-server"])
-    zc = Zeroconf()
-    browser = ServiceBrowser(zc, TYPE_CONNECT, handlers=[on_service_state_change])
     
+    # 尝试读取上次已知的连接地址，开机后可直接重试连接
+    init_state = load_state()
+    if init_state.get("last_ip") and init_state.get("last_port"):
+        target_ip = init_state["last_ip"]
+        target_port = init_state["last_port"]
+        logger.info(f"[*] 读取上次连接地址: {target_ip}:{target_port}")
+
+    zc = Zeroconf()
+    browser = ServiceBrowser(zc, [TYPE_CONNECT, TYPE_ADB], handlers=[on_service_state_change])
+    
+    wait_count = 0
     try:
         while True:
             if target_ip and target_port:
@@ -294,6 +308,14 @@ if __name__ == '__main__':
                 if "connected" in out.lower() and "failed" not in out.lower():
                     logger.info("[调试] 连接成功，开始通过 MediaStore 扫描手机...")
                     perform_sync()
+                elif "10061" in out:
+                    if wait_count % 6 == 0:
+                        logger.info("    [!] 提示: 手机端口拒绝连接 (10061)。这通常是由于手机息屏或【无线调试】被系统关闭，请在手机【开发者选项】中重新开启【无线调试】。")
+                    wait_count += 1
+            else:
+                wait_count += 1
+                if wait_count % 6 == 0:
+                    logger.info("[*] 正在等待手机接入局域网 (请确保手机连接同一 Wi-Fi 并已开启【无线调试】)...")
             time.sleep(SYNC_INTERVAL)
     except KeyboardInterrupt:
         logger.info("\n[!] 守护程序已退出。")
