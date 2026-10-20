@@ -23,7 +23,9 @@ DEFAULT_CONFIG = {
     "pc_sync_dir": r"C:\PhotoSync",
     "sync_interval_seconds": 10,
     "log_max_size_mb": 10,
-    "log_backup_count": 3
+    "log_backup_count": 3,
+    "trash_folder_name": "回收站",
+    "delete_phone_file_on_direct_delete": True
 }
 
 def load_config():
@@ -48,6 +50,8 @@ PC_SYNC_DIR = CONFIG["pc_sync_dir"]
 SYNC_INTERVAL = CONFIG["sync_interval_seconds"]
 LOG_MAX_SIZE = CONFIG["log_max_size_mb"] * 1024 * 1024
 LOG_BACKUP_COUNT = CONFIG["log_backup_count"]
+TRASH_FOLDER_NAME = CONFIG.get("trash_folder_name", "回收站")
+DELETE_ON_DIRECT_DELETE = CONFIG.get("delete_phone_file_on_direct_delete", True)
 
 # ================= 日志系统配置 =================
 logger = logging.getLogger("SyncDaemon")
@@ -133,17 +137,37 @@ def on_service_state_change(zeroconf, service_type, name, state_change):
                 save_state(state)
 
 def perform_sync():
-    """执行核心逻辑：检查删除 -> 同步新照片 (MediaStore 引擎)"""
+    """执行核心逻辑：检查删除 -> 同步新照片 (支持多层级子目录分类与回收站)"""
     if not os.path.exists(PC_SYNC_DIR):
         os.makedirs(PC_SYNC_DIR)
+
+    # 确保回收站文件夹存在
+    trash_dir = os.path.join(PC_SYNC_DIR, TRASH_FOLDER_NAME)
+    if not os.path.exists(trash_dir):
+        try:
+            os.makedirs(trash_dir)
+        except Exception:
+            pass
+    trash_dir_abs = os.path.abspath(trash_dir)
 
     state = load_state()
     synced_files_history = set(state.get("synced_files", []))
     
-    current_pc_files = set()
-    for f in os.listdir(PC_SYNC_DIR):
-        if os.path.isfile(os.path.join(PC_SYNC_DIR, f)):
-            current_pc_files.add(f)
+    # 递归扫描电脑同步目录下的所有文件 (分为 分类/正常文件 与 回收站文件)
+    active_pc_files = {}  # filename -> full_filepath
+    trash_pc_files = {}   # filename -> full_filepath
+    
+    for root, dirs, files in os.walk(PC_SYNC_DIR):
+        root_abs = os.path.abspath(root)
+        is_in_trash = (root_abs == trash_dir_abs or root_abs.startswith(trash_dir_abs + os.sep))
+        for f in files:
+            if f.startswith("."):
+                continue
+            full_path = os.path.join(root, f)
+            if is_in_trash:
+                trash_pc_files[f] = full_path
+            else:
+                active_pc_files[f] = full_path
             
     # ---------------- 0. 查询手机底层媒体库 ----------------
     logger.info(f"\n[🔄] 开始查询手机底层媒体库 (全盘智能扫描)...")
@@ -183,55 +207,82 @@ def perform_sync():
         }
         
     phone_files_count = len(phone_files_info)
-    pc_files_count = len(current_pc_files)
-    logger.info(f"[调试] 媒体库扫描完毕。当前状态 -> 手机: {phone_files_count} 张 | 电脑: {pc_files_count} 张 | 历史记录: {len(synced_files_history)} 张")
+    pc_active_count = len(active_pc_files)
+    pc_trash_count = len(trash_pc_files)
+    logger.info(f"[调试] 媒体库扫描完毕。当前状态 -> 手机: {phone_files_count} 张 | 电脑在库/分类: {pc_active_count} 张 | 回收站待删: {pc_trash_count} 张 | 历史记录: {len(synced_files_history)} 张")
 
-    # ---------------- 1. 检查电脑上被删除的照片，并同步删除手机端 ----------------
-    files_to_delete_on_phone = []
-    for history_file in synced_files_history:
-        if history_file not in current_pc_files:
-            files_to_delete_on_phone.append(history_file)
-            
-    if len(files_to_delete_on_phone) > 0:
-        logger.info(f"\n[*] 检测到你在电脑上清理了 {len(files_to_delete_on_phone)} 张废片，正在同步清理手机...")
-        for filename in files_to_delete_on_phone:
-            if filename in phone_files_info:
-                phone_filepath = phone_files_info[filename]["path"]
-                logger.info(f"    [-] 从手机删除: {filename}")
-                safe_path = phone_filepath.replace("'", "''")
-                run_adb_command(["shell", "content", "delete", "--uri", "content://media/external/images/media", "--where", f"_data=\\'{safe_path}\\'"])
-                run_adb_command(["shell", "content", "delete", "--uri", "content://media/external/video/media", "--where", f"_data=\\'{safe_path}\\'"])
-                run_adb_command(["shell", "rm", f'"{phone_filepath}"'])
-                
-        for f in files_to_delete_on_phone:
-            synced_files_history.remove(f)
-            
+    # ---------------- 1. 检查删除并同步手机端 ----------------
+    # 1.1 检查放入回收站的文件 -> 手机端同步删除
+    deleted_from_trash = []
+    for filename in list(trash_pc_files.keys()):
+        if filename in phone_files_info:
+            phone_filepath = phone_files_info[filename]["path"]
+            logger.info(f"    [-] 检测到电脑【{TRASH_FOLDER_NAME}】中有废片，正在从手机端同步删除: {filename}")
+            safe_path = phone_filepath.replace("'", "''")
+            run_adb_command(["shell", "content", "delete", "--uri", "content://media/external/images/media", "--where", f"_data=\\'{safe_path}\\'"])
+            run_adb_command(["shell", "content", "delete", "--uri", "content://media/external/video/media", "--where", f"_data=\\'{safe_path}\\'"])
+            run_adb_command(["shell", "rm", f'"{phone_filepath}"'])
+            deleted_from_trash.append(filename)
+            if filename in synced_files_history:
+                synced_files_history.remove(filename)
+
+    if deleted_from_trash:
         state["synced_files"] = list(synced_files_history)
         save_state(state)
-        logger.info(f"[✅] 手机清理完成！")
+        logger.info(f"[✅] 回收站中 {len(deleted_from_trash)} 张废片已从手机端清理完成！")
+
+    # 1.2 检查电脑端直接彻底删除的文件 (不在任何分类文件夹，也不在回收站)
+    if DELETE_ON_DIRECT_DELETE:
+        files_to_delete_on_phone = []
+        for history_file in list(synced_files_history):
+            if history_file not in active_pc_files and history_file not in trash_pc_files:
+                files_to_delete_on_phone.append(history_file)
+                
+        if len(files_to_delete_on_phone) > 0:
+            logger.info(f"\n[*] 检测到你在电脑上彻底移除了 {len(files_to_delete_on_phone)} 个文件，正在同步清理手机...")
+            for filename in files_to_delete_on_phone:
+                if filename in phone_files_info:
+                    phone_filepath = phone_files_info[filename]["path"]
+                    logger.info(f"    [-] 从手机删除: {filename}")
+                    safe_path = phone_filepath.replace("'", "''")
+                    run_adb_command(["shell", "content", "delete", "--uri", "content://media/external/images/media", "--where", f"_data=\\'{safe_path}\\'"])
+                    run_adb_command(["shell", "content", "delete", "--uri", "content://media/external/video/media", "--where", f"_data=\\'{safe_path}\\'"])
+                    run_adb_command(["shell", "rm", f'"{phone_filepath}"'])
+                    
+            for f in files_to_delete_on_phone:
+                if f in synced_files_history:
+                    synced_files_history.remove(f)
+                
+            state["synced_files"] = list(synced_files_history)
+            save_state(state)
+            logger.info(f"[✅] 手机端清理完成！")
 
     # ---------------- 2. 检查新照片并下载到电脑 ----------------
     new_files_downloaded = 0
     for filename, info in phone_files_info.items():
+        # 如果文件位于电脑回收站中，说明是废片，绝不重复下载
+        if filename in trash_pc_files:
+            continue
+            
         phone_filepath = info["path"]
         phone_file_size = info["size"]
-        pc_filepath = os.path.join(PC_SYNC_DIR, filename)
         
         needs_download = False
+        target_download_path = os.path.join(PC_SYNC_DIR, filename)
         
-        if filename not in current_pc_files:
+        if filename not in active_pc_files:
             needs_download = True
         else:
+            pc_filepath = active_pc_files[filename]
             if not os.path.exists(pc_filepath):
-                # 核心修复：如果你在同步循环的间隙删除了电脑上的文件，os.path.exists 会发现它不见了。
-                # 之前这里会将其标记为需要重新下载（导致废片复活）。
-                # 现在我们直接跳过，把删除操作留给下一轮循环的 Step 1 去处理（从手机端彻底删除）。
+                # 核心保护：如果在同步循环间隙文件被移动或删除，直接跳过，留给下一轮循环处理
                 continue
             else:
                 pc_file_size = os.path.getsize(pc_filepath)
                 if pc_file_size != phone_file_size:
                     logger.info(f"    [!] 发现文件损坏或未下载完整 (手机: {phone_file_size}B, 电脑: {pc_file_size}B) -> 准备覆盖重下: {filename}")
                     needs_download = True
+                    target_download_path = pc_filepath
                 else:
                     if filename not in synced_files_history:
                         synced_files_history.add(filename)
@@ -239,12 +290,12 @@ def perform_sync():
                         save_state(state)
                     
         if needs_download:
-            out, pull_code = run_adb_command(["pull", phone_filepath, pc_filepath])
+            out, pull_code = run_adb_command(["pull", phone_filepath, target_download_path])
             if pull_code == 0:
-                if os.path.exists(pc_filepath) and os.path.getsize(pc_filepath) == phone_file_size:
+                if os.path.exists(target_download_path) and os.path.getsize(target_download_path) == phone_file_size:
                     logger.info(f"    [+] 成功备份并校验通过: {filename}")
                     synced_files_history.add(filename)
-                    current_pc_files.add(filename)
+                    active_pc_files[filename] = target_download_path
                     new_files_downloaded += 1
                     
                     state["synced_files"] = list(synced_files_history)
