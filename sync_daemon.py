@@ -213,6 +213,7 @@ def perform_sync():
 
     # ---------------- 1. 检查删除并同步手机端 ----------------
     # 1.1 检查放入回收站的文件 -> 手机端同步删除
+    #     只处理手机端仍然存在的文件；如果手机端已无此文件，说明上次已删过，跳过
     deleted_from_trash = []
     for filename in list(trash_pc_files.keys()):
         if filename in phone_files_info:
@@ -223,8 +224,9 @@ def perform_sync():
             run_adb_command(["shell", "content", "delete", "--uri", "content://media/external/video/media", "--where", f"_data=\\'{safe_path}\\'"])
             run_adb_command(["shell", "rm", f'"{phone_filepath}"'])
             deleted_from_trash.append(filename)
-            if filename in synced_files_history:
-                synced_files_history.remove(filename)
+        # 不管手机端是否还有，只要在回收站就从历史记录中移除（防止被误判为"电脑删除"触发二次删除）
+        if filename in synced_files_history:
+            synced_files_history.remove(filename)
 
     if deleted_from_trash:
         state["synced_files"] = list(synced_files_history)
